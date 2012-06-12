@@ -20,10 +20,13 @@ package org.zeroturnaround.jenkins;
 import hudson.FilePath;
 import hudson.model.BuildListener;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.logging.Logger;
 import java.util.zip.ZipException;
 
 import com.zeroturnaround.liverebel.api.ApplicationInfo;
@@ -43,8 +46,11 @@ import com.zeroturnaround.liverebel.util.LiveRebelXml;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.zeroturnaround.jenkins.LiveRebelDeployPublisher.Strategy;
+import org.zeroturnaround.zip.ZipUtil;
 
 /**
  * @author Juri Timoshin
@@ -52,6 +58,7 @@ import org.zeroturnaround.jenkins.LiveRebelDeployPublisher.Strategy;
 public class LiveRebelProxy {
 
   public static final String ARTIFACT_DEPLOYED_AND_UPDATED = "SUCCESS. Artifact deployed and activated in all %s servers: %s\n";
+  private static final Logger LOGGER = Logger.getLogger(LiveRebelProxy.class.getName());
   private final CommandCenterFactory commandCenterFactory;
   private final BuildListener listener;
   private CommandCenter commandCenter;
@@ -63,7 +70,7 @@ public class LiveRebelProxy {
     this.listener = listener;
   }
 
-  public boolean perform(FilePath[] wars, String contextPath, List<String> deployableServers, Strategy strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly) throws IOException, InterruptedException {
+  public boolean perform(FilePath[] wars, String contextPath, List<String> deployableServers, Strategy strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm override, String meta) throws IOException, InterruptedException {
     if (wars.length == 0) {
       listener.getLogger().println("Could not find any artifact to deploy. Please, specify it in job configuration.");
       return false;
@@ -84,8 +91,28 @@ public class LiveRebelProxy {
     listener.getLogger().println("Deploying artifacts.");
     for (FilePath warFile : wars) {
       boolean result = false;
+      Boolean tempFileCreated = false;
       try {
         listener.getLogger().printf("Processing artifact: %s\n", warFile);
+        if (override != null && (override.getApp() != null || override.getVer() != null)) {
+          String app = override.getApp();
+          if (app == null || app.trim().equals("")) {
+            app = null;
+          }
+          String ver = override.getVer();
+          if (ver == null || ver.trim().equals("")) {
+            ver = null;
+          }
+          warFile = overrideOrCreateXML(new File(warFile.getRemote()), app, ver);
+          tempFileCreated = true;
+        }
+        
+        if (meta != null) {
+          File metaFile = new File(meta);
+          warFile = addMetadataIntoArchive(new File(warFile.getRemote()), metaFile);
+          tempFileCreated = true;
+        }
+        
         LiveRebelXml lrXml = getLiveRebelXml(warFile);
         ApplicationInfo applicationInfo = getCommandCenter().getApplication(lrXml.getApplicationId());
         uploadIfNeeded(applicationInfo, lrXml.getVersionId(), warFile);
@@ -128,6 +155,10 @@ public class LiveRebelProxy {
         listener.getLogger().println("ERROR! Unexpected error occured:");
         listener.getLogger().println();
         t.printStackTrace(listener.getLogger());
+      } finally {
+        if (tempFileCreated) {
+          FileUtils.deleteQuietly(new File (warFile.getRemote()));
+        }
       }
       if (!result)
         return result;
@@ -309,5 +340,107 @@ public class LiveRebelProxy {
    */
   public CommandCenter getCommandCenter() {
     return commandCenter;
+  }
+  
+  protected FilePath overrideOrCreateXML(File file, String app, String ver) throws IOException, InterruptedException {
+    if (!file.isFile())
+      throw new IllegalArgumentException("File not found: " + file.getAbsolutePath());
+    LiveRebelXml initialArchiveXml = getLiveRebelXml(new FilePath(file));
+    FilePath tempFile = null;
+    if (initialArchiveXml == null) {
+      tempFile = createLiveRebelXml(file, app, ver);
+    } else {
+      tempFile = overrideLiveRebelXml(file, app, ver, initialArchiveXml);
+    }
+    return tempFile;
+  }
+  
+  private FilePath overrideLiveRebelXml(File file, String app, String ver, LiveRebelXml initialArchiveXml) {
+    LiveRebelXml newArchiveXml;
+    if (app != null && ver != null){
+      newArchiveXml = new LiveRebelXml(app, ver);
+    } else if (app == null) {
+      newArchiveXml = new LiveRebelXml(initialArchiveXml.getApplicationId(), ver);
+    } else {
+      newArchiveXml = new LiveRebelXml(app, initialArchiveXml.getVersionId());
+    }
+    return new FilePath(addLiveRebelXml(file, newArchiveXml));
+  }
+
+  private FilePath createLiveRebelXml(File file, String app, String ver) {
+    if (app == null || ver == null) {
+      throw new IllegalArgumentException("Archive didn't contain liverebel.xml, but creation failed, because not enough information was given!" + "\n" +
+    "both Application name and version must be specified");
+    }
+      
+    LiveRebelXml xml = new LiveRebelXml(app, ver);
+    return new FilePath(addLiveRebelXml(file, xml));
+
+  }
+  
+  public String sanitize(String name) {
+    StringBuffer sb = new StringBuffer(name);
+    for (int i = 0; i < sb.length(); i++)
+      if (!Character.isLetterOrDigit(sb.charAt(i)))
+        sb.setCharAt(i, '-');
+    sb.append("-");
+    sb.append(DigestUtils.md5Hex(name));
+    return sb.toString();
+  }
+  
+  public File addLiveRebelXml(File file, LiveRebelXml xml) {
+    String destPath = file.getParentFile().getAbsolutePath()
+        + "/"
+        + sanitize(xml.getApplicationId() + "-" + xml.getVersionId() + "-"
+            + System.currentTimeMillis());
+    File destFile = new File(destPath);
+    
+    byte[] bytes;
+    try {
+      bytes = xml.getAsXml().getBytes("UTF-8");
+    }
+    catch (UnsupportedEncodingException e) {
+      throw new RuntimeException(e);
+    }
+    String liverebelXml = "WEB-INF/classes/liverebel.xml";
+    if (ZipUtil.containsEntry(file, liverebelXml)) {
+      ZipUtil.replaceEntry(file, liverebelXml, bytes, destFile);
+    }
+    else {
+      ZipUtil.addEntry(file, liverebelXml, bytes, destFile);
+    }
+    return destFile;
+  }
+  
+  private FilePath addMetadataIntoArchive(File archive, File metaData) {
+    if (!metaData.isFile())
+      throw new IllegalArgumentException("File not found: " + metaData.getAbsolutePath());
+    if (!archive.isFile())
+      throw new IllegalArgumentException("File not found: " + archive.getAbsolutePath());
+
+    return new FilePath(addMetaData(archive, metaData));
+  }
+  
+  private File addMetaData(File archive, File metaData) {
+    String destPath = archive.getParentFile().getAbsolutePath() + "/" + archive.getName() + "-"+ System.currentTimeMillis();
+    File destFile = new File(destPath);
+    byte bytes[];
+    try {
+      FileInputStream fin = new FileInputStream(metaData);
+      bytes = new byte[(int) metaData.length()];
+      fin.read(bytes);
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+
+    String metadata = "WEB-INF/metadata.txt";
+    if (ZipUtil.containsEntry(archive, metadata)) {
+      ZipUtil.replaceEntry(archive, metadata, bytes, destFile);
+    }
+    else {
+      ZipUtil.addEntry(archive, metadata, bytes, destFile);
+    }
+    return destFile;
   }
 }

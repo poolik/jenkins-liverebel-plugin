@@ -54,6 +54,7 @@ import com.zeroturnaround.liverebel.api.ServerInfo;
 
 /**
  * @author Juri Timoshin
+ * @author Tõnis Pool
  */
 public class LiveRebelDeployPublisher extends Notifier implements Serializable {
 
@@ -67,12 +68,36 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
   public final boolean uploadOnly;
   public final Strategy strategy;
   public final String contextPath;
+  public final OverrideForm overrideFrom;
+  public static String app;
+  public static String ver;
+  public final String metadata;
   private final List<ServerCheckbox> servers;
+  
+  public static boolean isOverride = false;
 
   // Fields in config.jelly must match the parameter names in the
   // "DataBoundConstructor"
   @DataBoundConstructor
-  public LiveRebelDeployPublisher(String artifacts, String contextPath, List<ServerCheckbox> servers, String strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly) {
+  public LiveRebelDeployPublisher(String artifacts, String contextPath, List<ServerCheckbox> servers, String strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm overrideFrom, String metadata) {
+    Logger LOGGER = Logger.getLogger(LiveRebelDeployPublisher.class.getName());
+    LOGGER.info("OVERRIDE: " + overrideFrom);
+    if (overrideFrom != null) {
+      isOverride = true;
+      app = overrideFrom.getApp();
+      ver = overrideFrom.getVer();
+    } else {
+      isOverride = false;
+      app = null;
+      ver = null;
+    }
+    this.overrideFrom = overrideFrom;
+    if (metadata == null || metadata.trim().equals("")) {
+      this.metadata = null;
+    } else {
+      this.metadata = metadata;
+    }
+
     this.contextPath = contextPath;
     this.artifacts = artifacts;
     this.uploadOnly = uploadOnly;
@@ -100,7 +125,7 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
     CommandCenterFactory commandCenterFactory = new CommandCenterFactory().setUrl(getDescriptor().getLrUrl()).setVerbose(true).authenticate(getDescriptor().getAuthToken());
 
     if (!new LiveRebelProxy(commandCenterFactory, listener).perform(deployableFiles, contextPath, getDeployableServers(),
-        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly))
+        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly, overrideFrom, metadata))
       build.setResult(Result.FAILURE);
     return true;
   }
@@ -207,17 +232,17 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
     }
 
     public FormValidation doCheckLrUrl(@QueryParameter("lrUrl") final String value) throws IOException,
-        ServletException {
-      if (value != null && value.length() > 0) {
-        try {
-          new URL(value);
-        }
-        catch (Exception e) {
-          return FormValidation.error("Should be a valid URL.");
-        }
-      }
-      return FormValidation.ok();
+    ServletException {
+  if (value != null && value.length() > 0) {
+    try {
+      new URL(value);
     }
+    catch (Exception e) {
+      return FormValidation.error("Should be a valid URL.");
+    }
+  }
+  return FormValidation.ok();
+}
 
     public FormValidation doCheckAuthToken(@QueryParameter("authToken") final String value) throws IOException,
         ServletException {
@@ -275,6 +300,8 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
         return FilePath.validateFileMask(project.getSomeWorkspace(), value);
       }
     }
+    
+    
   }
   private static final long serialVersionUID = 1L;
 }

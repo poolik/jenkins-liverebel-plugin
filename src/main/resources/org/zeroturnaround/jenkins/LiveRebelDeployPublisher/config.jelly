@@ -13,6 +13,19 @@
       Only upload artifacts to LiveRebel, no update or deployment will be triggered.
     </label>
   </f:entry>
+  
+  <f:nested> 
+     <table>
+       <f:optionalBlock name="overrideFrom" title="Override artifact liverebel.xml" checked="${instance.isOverride}">
+         <f:entry title="Application Name" field="app">
+           <f:textbox name="app" value="${instance.app}"/>
+         </f:entry>
+         <f:entry title="Application Version" field="ver">
+           <f:textbox value="${instance.ver}"/>
+         </f:entry>
+       </f:optionalBlock>
+         </table>
+  </f:nested> 
 
   <f:entry title="Context path" field="contextPath">
     <f:textbox/>
@@ -36,5 +49,9 @@
 
   <f:entry title="Servers">
     <f:repeatableProperty field="servers" default="${descriptor.defaultServers}" noAddButton="true"/>
+  </f:entry>
+  
+  <f:entry title="Metadata associated with this archive" field="metadata">
+    <f:textbox/>
   </f:entry>
 </j:jelly>

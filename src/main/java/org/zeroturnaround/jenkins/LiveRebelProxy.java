@@ -23,10 +23,10 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.logging.Logger;
 import java.util.zip.ZipException;
 
 import com.zeroturnaround.liverebel.api.ApplicationInfo;
@@ -58,7 +58,7 @@ import org.zeroturnaround.zip.ZipUtil;
 public class LiveRebelProxy {
 
   public static final String ARTIFACT_DEPLOYED_AND_UPDATED = "SUCCESS. Artifact deployed and activated in all %s servers: %s\n";
-  private static final Logger LOGGER = Logger.getLogger(LiveRebelProxy.class.getName());
+
   private final CommandCenterFactory commandCenterFactory;
   private final BuildListener listener;
   private CommandCenter commandCenter;
@@ -70,12 +70,12 @@ public class LiveRebelProxy {
     this.listener = listener;
   }
 
-  public boolean perform(FilePath[] wars, String contextPath, List<String> deployableServers, Strategy strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm override, String meta) throws IOException, InterruptedException {
+  public boolean perform(FilePath[] wars, String contextPath, List<String> deployableServers, Strategy strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm override, File meta) throws IOException, InterruptedException {
     if (wars.length == 0) {
       listener.getLogger().println("Could not find any artifact to deploy. Please, specify it in job configuration.");
       return false;
     }
-
+    
     if (deployableServers.isEmpty()) {
       listener.getLogger().println("No servers specified in LiveRebel configuration.");
       return false;
@@ -83,7 +83,7 @@ public class LiveRebelProxy {
 
     this.strategy = strategy;
     this.useFallbackIfCompatibleWithWarnings = useFallbackIfCompatibleWithWarnings;
-
+    
     if (!initCommandCenter()) {
       return false;
     }
@@ -92,24 +92,21 @@ public class LiveRebelProxy {
     for (FilePath warFile : wars) {
       boolean result = false;
       Boolean tempFileCreated = false;
+      ArrayList<File> filestToDelete = new ArrayList<File>();
       try {
         listener.getLogger().printf("Processing artifact: %s\n", warFile);
+        
         if (override != null && (override.getApp() != null || override.getVer() != null)) {
-          String app = override.getApp();
-          if (app == null || app.trim().equals("")) {
-            app = null;
-          }
-          String ver = override.getVer();
-          if (ver == null || ver.trim().equals("")) {
-            ver = null;
-          }
+          String app = noramlizeString(override.getApp());
+          String ver = noramlizeString(override.getVer());
           warFile = overrideOrCreateXML(new File(warFile.getRemote()), app, ver);
+          filestToDelete.add(new File(warFile.getRemote()));
           tempFileCreated = true;
         }
         
         if (meta != null) {
-          File metaFile = new File(meta);
-          warFile = addMetadataIntoArchive(new File(warFile.getRemote()), metaFile);
+          warFile = addMetadataIntoArchive(new File(warFile.getRemote()), meta);
+          filestToDelete.add(new File(warFile.getRemote()));
           tempFileCreated = true;
         }
         
@@ -157,13 +154,22 @@ public class LiveRebelProxy {
         t.printStackTrace(listener.getLogger());
       } finally {
         if (tempFileCreated) {
-          FileUtils.deleteQuietly(new File (warFile.getRemote()));
+          for (File file : filestToDelete) {
+            FileUtils.deleteQuietly(file);
+          }
         }
       }
       if (!result)
         return result;
     }
     return true;
+  }
+
+  private String noramlizeString(String name) {
+    if (name == null || name.trim().equals("")) {
+      name = null;
+    }
+    return name;
   }
 
   boolean initCommandCenter() {

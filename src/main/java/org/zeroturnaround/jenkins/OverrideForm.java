@@ -8,8 +8,8 @@ import hudson.model.Hudson;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 public class OverrideForm implements Describable<OverrideForm>{
-  private final String app;
-  private final String ver;
+  private String app;
+  private String ver;
   private final boolean override;
 
   @DataBoundConstructor
@@ -29,6 +29,14 @@ public class OverrideForm implements Describable<OverrideForm>{
 
   public String getVer() {
     return ver;
+  }
+  
+  public void setApp(String app) {
+    this.app = app;
+  }
+  
+  public void setVer(String ver) {
+    this.ver = ver;
   }
 
   public OverrideDescriptorImpl getDescriptor() {

@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
  *****************************************************************/
+import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
@@ -28,6 +29,8 @@ import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Notifier;
 import hudson.tasks.Publisher;
 import hudson.util.FormValidation;
+
+import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.net.URL;
@@ -67,21 +70,41 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
   public final boolean useFallbackIfCompatibleWithWarnings;
   public final boolean uploadOnly;
   public final Strategy strategy;
-  public final String contextPath;
+  public String contextPath;
   public final OverrideForm overrideFrom;
   public static String app;
   public static String ver;
-  public final String metadata;
+  public String metadata;
   private final List<ServerCheckbox> servers;
   
   public static boolean isOverride = false;
-
+  private static final Logger LOGGER = Logger.getLogger(LiveRebelDeployPublisher.class.getName());
+  
   // Fields in config.jelly must match the parameter names in the
   // "DataBoundConstructor"
   @DataBoundConstructor
   public LiveRebelDeployPublisher(String artifacts, String contextPath, List<ServerCheckbox> servers, String strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm overrideFrom, String metadata) {
-    Logger LOGGER = Logger.getLogger(LiveRebelDeployPublisher.class.getName());
-    LOGGER.info("OVERRIDE: " + overrideFrom);
+
+    checkIfOverride(overrideFrom);
+
+    this.metadata = normalizeString(metadata);
+    this.overrideFrom = overrideFrom;
+    this.contextPath = contextPath;
+    this.artifacts = artifacts;
+    this.uploadOnly = uploadOnly;
+    this.strategy = Strategy.valueOf(strategy);
+    this.servers = servers;
+    this.useFallbackIfCompatibleWithWarnings = useFallbackIfCompatibleWithWarnings;
+  }
+
+  private String normalizeString(String metadata) {
+    if (metadata == null || metadata.trim().equals("")) {
+      metadata = null;
+    } 
+    return metadata;
+  }
+
+  private void checkIfOverride(OverrideForm overrideFrom) {
     if (overrideFrom != null) {
       isOverride = true;
       app = overrideFrom.getApp();
@@ -91,19 +114,6 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
       app = null;
       ver = null;
     }
-    this.overrideFrom = overrideFrom;
-    if (metadata == null || metadata.trim().equals("")) {
-      this.metadata = null;
-    } else {
-      this.metadata = metadata;
-    }
-
-    this.contextPath = contextPath;
-    this.artifacts = artifacts;
-    this.uploadOnly = uploadOnly;
-    this.strategy = Strategy.valueOf(strategy);
-    this.servers = servers;
-    this.useFallbackIfCompatibleWithWarnings = useFallbackIfCompatibleWithWarnings;
   }
 
   @Override
@@ -113,6 +123,16 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
       return false;
     }
 
+    EnvVars envVars = build.getEnvironment(listener);
+    String artifacts = envVars.expand(this.artifacts);
+    String metadata = envVars.expand(this.metadata);
+    if (overrideFrom != null) {
+      overrideFrom.setApp(envVars.expand(overrideFrom.getApp()));
+      overrideFrom.setVer(envVars.expand(overrideFrom.getVer()));
+    }
+    String contextPath = envVars.expand(this.contextPath);
+
+    File metadataFile = checkAndCreateMetadataFile(build, metadata);
     FilePath[] deployableFiles;
     if (build.getWorkspace().isRemote()) {
       new ArtifactArchiver(artifacts, "", true).perform(build, launcher, listener);
@@ -125,9 +145,17 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
     CommandCenterFactory commandCenterFactory = new CommandCenterFactory().setUrl(getDescriptor().getLrUrl()).setVerbose(true).authenticate(getDescriptor().getAuthToken());
 
     if (!new LiveRebelProxy(commandCenterFactory, listener).perform(deployableFiles, contextPath, getDeployableServers(),
-        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly, overrideFrom, metadata))
+        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly, overrideFrom, metadataFile))
       build.setResult(Result.FAILURE);
     return true;
+  }
+
+  private File checkAndCreateMetadataFile(AbstractBuild build, String metadata) {
+    File metadataFile = null;
+    if (metadata != null) {
+      metadataFile = new File(build.getWorkspace().getRemote(), metadata);
+    }
+    return metadataFile;
   }
 
   // Overridden for better type safety.

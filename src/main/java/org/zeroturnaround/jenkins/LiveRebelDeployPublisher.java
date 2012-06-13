@@ -57,7 +57,7 @@ import com.zeroturnaround.liverebel.api.ServerInfo;
 
 /**
  * @author Juri Timoshin
- * @author Tõnis Pool
+ * 
  */
 public class LiveRebelDeployPublisher extends Notifier implements Serializable {
 
@@ -70,11 +70,11 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
   public final boolean useFallbackIfCompatibleWithWarnings;
   public final boolean uploadOnly;
   public final Strategy strategy;
-  public String contextPath;
+  public final String contextPath;
   public final OverrideForm overrideFrom;
-  public static String app;
-  public static String ver;
-  public String metadata;
+  public final String app;
+  public final String ver;
+  public final String metadata;
   private final List<ServerCheckbox> servers;
   
   public static boolean isOverride = false;
@@ -85,7 +85,15 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
   @DataBoundConstructor
   public LiveRebelDeployPublisher(String artifacts, String contextPath, List<ServerCheckbox> servers, String strategy, boolean useFallbackIfCompatibleWithWarnings, boolean uploadOnly, OverrideForm overrideFrom, String metadata) {
 
-    checkIfOverride(overrideFrom);
+    if (overrideFrom != null) {
+      isOverride = true;
+      this.app = overrideFrom.getApp();
+      this.ver = overrideFrom.getVer();
+    } else {
+      isOverride = false;
+      this.app = null;
+      this.ver = null;
+    }
 
     this.metadata = normalizeString(metadata);
     this.overrideFrom = overrideFrom;
@@ -102,18 +110,6 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
       metadata = null;
     } 
     return metadata;
-  }
-
-  private void checkIfOverride(OverrideForm overrideFrom) {
-    if (overrideFrom != null) {
-      isOverride = true;
-      app = overrideFrom.getApp();
-      ver = overrideFrom.getVer();
-    } else {
-      isOverride = false;
-      app = null;
-      ver = null;
-    }
   }
 
   @Override

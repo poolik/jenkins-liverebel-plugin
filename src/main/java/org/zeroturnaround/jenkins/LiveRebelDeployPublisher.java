@@ -124,28 +124,28 @@ public class LiveRebelDeployPublisher extends Notifier implements Serializable {
     }
 
     EnvVars envVars = build.getEnvironment(listener);
-    String artifacts = envVars.expand(this.artifacts);
-    String metadata = envVars.expand(this.metadata);
-    if (overrideFrom != null) {
-      overrideFrom.setApp(envVars.expand(overrideFrom.getApp()));
-      overrideFrom.setVer(envVars.expand(overrideFrom.getVer()));
+    String artifactsLoc = envVars.expand(this.artifacts);
+    String metadataLoc = envVars.expand(this.metadata);
+    OverrideForm overrideFormLoc = null;
+    if (this.overrideFrom != null) {
+      overrideFormLoc = new OverrideForm(envVars.expand(this.overrideFrom.getApp()), envVars.expand(this.overrideFrom.getVer()), false);
     }
-    String contextPath = envVars.expand(this.contextPath);
+    String contextPathLoc = envVars.expand(this.contextPath);
 
-    File metadataFile = checkAndCreateMetadataFile(build, metadata);
+    File metadataFile = checkAndCreateMetadataFile(build, metadataLoc);
     FilePath[] deployableFiles;
     if (build.getWorkspace().isRemote()) {
-      new ArtifactArchiver(artifacts, "", true).perform(build, launcher, listener);
-      deployableFiles = new FilePath(build.getArtifactsDir()).list(artifacts);
+      new ArtifactArchiver(artifactsLoc, "", true).perform(build, launcher, listener);
+      deployableFiles = new FilePath(build.getArtifactsDir()).list(artifactsLoc);
     }
     else {
-      deployableFiles = build.getWorkspace().list(artifacts);
+      deployableFiles = build.getWorkspace().list(artifactsLoc);
     }
 
     CommandCenterFactory commandCenterFactory = new CommandCenterFactory().setUrl(getDescriptor().getLrUrl()).setVerbose(true).authenticate(getDescriptor().getAuthToken());
 
-    if (!new LiveRebelProxy(commandCenterFactory, listener).perform(deployableFiles, contextPath, getDeployableServers(),
-        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly, overrideFrom, metadataFile))
+    if (!new LiveRebelProxy(commandCenterFactory, listener).perform(deployableFiles, contextPathLoc, getDeployableServers(),
+        strategy, useFallbackIfCompatibleWithWarnings, uploadOnly, overrideFormLoc, metadataFile))
       build.setResult(Result.FAILURE);
     return true;
   }
